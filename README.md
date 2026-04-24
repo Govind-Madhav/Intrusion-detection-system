@@ -46,3 +46,7 @@ mvn exec:java -Dexec.args="--iface Ethernet --window 10 --syn-threshold 15 --icm
 Open `frontend/index.html` directly in browser.
 
 The frontend is a single-file React demo (CDN + Babel) with mock alert data.
+
+## License
+
+This project is licensed under the Apache License 2.0. See LICENSE and NOTICE.
