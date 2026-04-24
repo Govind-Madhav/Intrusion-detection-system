@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IDS Dashboard</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+      body {
+        margin: 0;
+        font-family: Segoe UI, Tahoma, sans-serif;
+        background: #f3f6ff;
+      }
+      .page {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 12px;
+      }
+      .card, .table-wrap, .filters {
+        background: #fff;
+        border: 1px solid #d8e3ff;
+        border-radius: 10px;
+      }
+      .card {
+        padding: 12px;
+      }
+      .card strong {
+        display: block;
+        margin-top: 6px;
+        font-size: 22px;
+      }
+      .filters {
+        margin-top: 14px;
+        margin-bottom: 14px;
+        padding: 12px;
+        display: flex;
+        gap: 10px;
+      }
+      .filters input, .filters select {
+        padding: 8px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+      }
+      .filters input { width: 100%; }
+      .table-wrap {
+        overflow-x: auto;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th, td {
+        padding: 10px;
+        border-bottom: 1px solid #e5e7eb;
+        text-align: left;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="text/babel">
+      const sampleAlerts = [
+        {
+          id: "ALT-1001",
+          timestamp: "2026-04-25T10:15:00Z",
+          sourceIp: "192.168.1.10",
+          destinationIp: "192.168.1.2",
+          alertType: "SYN_SCAN",
+          severity: "HIGH",
+          message: "Possible SYN scan detected"
+        },
+        {
+          id: "ALT-1002",
+          timestamp: "2026-04-25T10:16:10Z",
+          sourceIp: "10.0.0.8",
+          destinationIp: "10.0.0.2",
+          alertType: "ICMP_FLOOD",
+          severity: "MEDIUM",
+          message: "ICMP burst over threshold"
+        }
+      ];
+
+      function App() {
+        const [q, setQ] = React.useState("");
+        const [type, setType] = React.useState("ALL");
+
+        const alerts = sampleAlerts.filter((a) => {
+          const typeMatch = type === "ALL" || a.alertType === type;
+          const query = q.toLowerCase();
+          const textMatch =
+            a.sourceIp.includes(q) ||
+            a.destinationIp.includes(q) ||
+            a.message.toLowerCase().includes(query);
+          return typeMatch && textMatch;
+        });
+
+        const total = alerts.length;
+        const syn = alerts.filter((a) => a.alertType === "SYN_SCAN").length;
+        const icmp = alerts.filter((a) => a.alertType === "ICMP_FLOOD").length;
+        const risky = alerts.filter((a) => a.alertType === "RISKY_PORT").length;
+
+        return (
+          <main className="page">
+            <h1>IDS Dashboard</h1>
+            <p>Single-file React frontend for demo use.</p>
+
+            <section className="cards">
+              <div className="card"><span>Total Alerts</span><strong>{total}</strong></div>
+              <div className="card"><span>SYN Scan</span><strong>{syn}</strong></div>
+              <div className="card"><span>ICMP Flood</span><strong>{icmp}</strong></div>
+              <div className="card"><span>Risky Port</span><strong>{risky}</strong></div>
+            </section>
+
+            <section className="filters">
+              <input
+                placeholder="Search by IP/message"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+              <select value={type} onChange={(e) => setType(e.target.value)}>
+                <option value="ALL">ALL</option>
+                <option value="SYN_SCAN">SYN_SCAN</option>
+                <option value="ICMP_FLOOD">ICMP_FLOOD</option>
+                <option value="RISKY_PORT">RISKY_PORT</option>
+              </select>
+            </section>
+
+            <section className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Source</th>
+                    <th>Destination</th>
+                    <th>Type</th>
+                    <th>Severity</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {alerts.map((a) => (
+                    <tr key={a.id}>
+                      <td>{a.timestamp}</td>
+                      <td>{a.sourceIp}</td>
+                      <td>{a.destinationIp}</td>
+                      <td>{a.alertType}</td>
+                      <td>{a.severity}</td>
+                      <td>{a.message}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          </main>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>
