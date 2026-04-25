@@ -6,6 +6,12 @@ Each person updates only their own section until the project is finished.
 Project Lead: Govind Madhav
 - Keeps the team organized and does the final review.
 
+## One Project Flow (Mandatory)
+
+PacketCapture -> PacketData -> DetectionEngine -> Detector -> AlertEvent -> AlertLogger
+
+All team members must follow this exact flow.
+
 ## Git Guide
 
 - `git pull` - get the latest changes from GitHub and update your local repo.
@@ -45,12 +51,14 @@ Status: Not Started
 Scope:
 - Select network interface
 - Capture packets
-- Pass packet details to the detection layer
+- Convert raw packets into PacketData
+- Final output from this layer must be PacketData only
 
 Files:
 - src/main/java/com/ids/capture/InterfaceSelector.java
 - src/main/java/com/ids/capture/PacketCaptureService.java
 - src/main/java/com/ids/config/CliArgs.java
+- src/main/java/com/ids/model/PacketData.java
 
 Daily Notes:
 - YYYY-MM-DD:
@@ -78,20 +86,20 @@ Owner: Govind Madhav
 Status: In Progress
 
 Scope:
-- Build the detection engine
-- Add SYN scan detection
-- Add ICMP flood detection
-- Add risky port detection
-- Keep alert data consistent
-- Set alert severity correctly
-- Prepare alert data for the frontend
+- Build DetectionEngine using a list of detectors
+- Define Detector interface
+- Add SynScanDetector, IcmpFloodDetector, and RiskyPortDetector
+- Each detector must take PacketData, make a decision, and return AlertEvent
+- Keep alert data consistent and set severity correctly
 
 Files:
 - src/main/java/com/ids/detection/DetectionEngine.java
+- src/main/java/com/ids/detection/Detector.java
 - src/main/java/com/ids/detection/SynScanDetector.java
 - src/main/java/com/ids/detection/IcmpFloodDetector.java
 - src/main/java/com/ids/detection/RiskyPortDetector.java
 - src/main/java/com/ids/model/AlertEvent.java
+- src/main/java/com/ids/model/PacketData.java
 
 Daily Notes:
 - YYYY-MM-DD:
@@ -102,7 +110,7 @@ Blockers:
 ## Person 3 - Testing and Reporting
 
 Owner: Dhruvi Bagga
-
+ 
 Status: Not Started
 
 Scope:
