@@ -3,17 +3,21 @@ package com.ids.detection;
 import com.ids.model.AlertEvent;
 import com.ids.model.PacketData;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class IcmpFloodDetector implements Detector {
     private static final String DETECTOR_NAME = "ICMP_FLOOD_DETECTOR";
     private static final int THRESHOLD = 50;           // Alert if more than 50 ICMP packets in window
     private static final long WINDOW_MS = 5000;        // 5 second sliding window
+    private static final long CLEANUP_INTERVAL_MS = 1000; // Cleanup every second
 
-    private final ConcurrentHashMap<String, PacketWindow> sourceWindows = new ConcurrentHashMap<>();
+    private final Map<String, SourceWindow> sourceWindows = new HashMap<>();
+    private volatile long lastCleanup = System.currentTimeMillis();
 
     @Override
     public Optional<AlertEvent> detect(PacketData packet) {
@@ -22,17 +26,46 @@ public class IcmpFloodDetector implements Detector {
         }
 
         String sourceIP = packet.getSourceIP();
+        if (sourceIP == null || sourceIP.isEmpty()) {
+            return Optional.empty();
+        }
+        
         long currentTime = System.currentTimeMillis();
+        
+        // Periodic cleanup to prevent memory leaks
+        performCleanup(currentTime);
 
-        PacketWindow window = sourceWindows.computeIfAbsent(sourceIP, k -> new PacketWindow());
-        window.addPacket(currentTime);
+        synchronized (sourceWindows) {
+            SourceWindow window = sourceWindows.computeIfAbsent(sourceIP, k -> new SourceWindow());
+            window.addPacket(currentTime);
+            
+            int count = window.getValidPacketCount(currentTime);
 
-        // Check if threshold exceeded
-        if (window.getCount(currentTime) > THRESHOLD) {
-            return createAlert(packet, window.getCount(currentTime));
+            // Check if threshold exceeded
+            if (count > THRESHOLD) {
+                String severity = count > 150 ? "CRITICAL" : count > 100 ? "HIGH" : "MEDIUM";
+                Optional<AlertEvent> alert = createAlert(packet, count, severity);
+                
+                // Reset the window after alert to avoid duplicate alerts
+                window.reset();
+                
+                return alert;
+            }
         }
 
         return Optional.empty();
+    }
+    
+    private void performCleanup(long currentTime) {
+        if (currentTime - lastCleanup > CLEANUP_INTERVAL_MS) {
+            synchronized (sourceWindows) {
+                sourceWindows.entrySet().removeIf(e -> {
+                    e.getValue().cleanup(currentTime);
+                    return e.getValue().isEmpty();
+                });
+            }
+            lastCleanup = currentTime;
+        }
     }
 
     private boolean isIcmpPacket(PacketData packet) {
@@ -41,10 +74,9 @@ public class IcmpFloodDetector implements Detector {
         return protocol.contains("ICMP");
     }
 
-    private Optional<AlertEvent> createAlert(PacketData packet, int packetCount) {
-        String severity = packetCount > 100 ? "CRITICAL" : "HIGH";
-        String message = String.format("ICMP Flood detected: %d packets from %s in 5 second window", 
-                packetCount, packet.getSourceIP());
+    private Optional<AlertEvent> createAlert(PacketData packet, int packetCount, String severity) {
+        String message = String.format("%d ICMP packets from %s to %s in 5 second window (Possible flood attack)", 
+                packetCount, packet.getSourceIP(), packet.getDestinationIP());
 
         AlertEvent alert = new AlertEvent(
                 generateAlertId(),
@@ -73,28 +105,41 @@ public class IcmpFloodDetector implements Detector {
         return DETECTOR_NAME;
     }
 
-    // Helper class for sliding window tracking
-    private static class PacketWindow {
-        private final long[] timestamps = new long[1000];
-        private int index = 0;
-        private final AtomicInteger count = new AtomicInteger(0);
+    // Proper sliding window with automatic cleanup
+    private static class SourceWindow {
+        private final Deque<Long> timestamps = new ArrayDeque<>();
+        private static final int MAX_CAPACITY = 500; // Maximum timestamps to track
 
-        synchronized void addPacket(long currentTime) {
-            timestamps[index % 1000] = currentTime;
-            index++;
-            count.incrementAndGet();
+        synchronized void addPacket(long timestamp) {
+            timestamps.addLast(timestamp);
+            // Prevent unbounded growth
+            if (timestamps.size() > MAX_CAPACITY) {
+                timestamps.removeFirst();
+            }
         }
 
-        synchronized int getCount(long currentTime) {
-            long windowStart = currentTime - 5000; // 5 second window
-            int validCount = 0;
-
+        synchronized int getValidPacketCount(long currentTime) {
+            long windowStart = currentTime - WINDOW_MS;
+            int count = 0;
             for (long ts : timestamps) {
                 if (ts > windowStart && ts <= currentTime) {
-                    validCount++;
+                    count++;
                 }
             }
-            return validCount;
+            return count;
+        }
+        
+        synchronized void cleanup(long currentTime) {
+            long windowStart = currentTime - WINDOW_MS;
+            timestamps.removeIf(ts -> ts <= windowStart);
+        }
+        
+        synchronized boolean isEmpty() {
+            return timestamps.isEmpty();
+        }
+        
+        synchronized void reset() {
+            timestamps.clear();
         }
     }
 }
