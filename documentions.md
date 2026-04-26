@@ -46,7 +46,7 @@ All team members must follow this exact flow.
 
 Owner: Utkarsh
 
-Status: Not Started
+Status: Complete
 
 Scope:
 - Select network interface
@@ -83,7 +83,7 @@ Shared Notes:
 
 Owner: Govind Madhav
 
-Status: In Progress
+Status: Complete
 
 Scope:
 - Build DetectionEngine using a list of detectors
