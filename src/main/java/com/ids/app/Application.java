@@ -9,37 +9,60 @@ import org.pcap4j.core.PcapNetworkInterface;
 import org.pcap4j.core.NotOpenException;
 
 import java.util.List;
+import java.time.Instant;
 
 public class Application {
 
     public static void main(String[] args) {
-        CliArgs cliArgs = CliArgs.parse(args);
-
         try {
+            CliArgs cliArgs = CliArgs.parse(args);
+            
+            if (cliArgs.isVerbose()) {
+                System.out.println("[DEBUG] Configuration: " + cliArgs);
+            }
+
+            // Select interface
             PcapNetworkInterface networkInterface = InterfaceSelector.select(cliArgs.getInterfaceName());
-            System.out.printf("Capturing %d packets from interface: %s (%s)%n",
+            System.out.printf("[INFO] Capturing %d packets from interface: %s (%s)%n",
                     cliArgs.getPacketCount(), networkInterface.getName(), networkInterface.getDescription());
 
-            PacketCaptureService captureService = new PacketCaptureService(cliArgs.getSnapLen(), cliArgs.getTimeoutMillis());
-            List<PacketData> packets = captureService.capture(networkInterface, cliArgs.getPacketCount());
+            // Perform capture
+            long startTime = System.currentTimeMillis();
+            try (PacketCaptureService captureService = new PacketCaptureService(cliArgs.getSnapLen(), cliArgs.getTimeoutMillis())) {
+                List<PacketData> packets = captureService.capture(networkInterface, cliArgs.getPacketCount());
+                long duration = System.currentTimeMillis() - startTime;
 
-            if (packets.isEmpty()) {
-                System.out.println("No packets were captured within the timeout period.");
-                return;
-            }
+                // Report statistics
+                PacketCaptureService.CaptureStatistics stats = captureService.getStatistics();
+                System.out.printf("[INFO] Captured %d packets in %dms (failed: %d)%n", 
+                        stats.processed, duration, stats.failed);
 
-            for (PacketData packet : packets) {
-                System.out.println(packet);
+                if (packets.isEmpty()) {
+                    System.out.println("[WARN] No packets were captured within the timeout period.");
+                    return;
+                }
+
+                // Output captured packets
+                if (cliArgs.isVerbose()) {
+                    System.out.println("[DEBUG] Detailed packet output:");
+                    for (PacketData packet : packets) {
+                        System.out.println(packet);
+                    }
+                } else {
+                    System.out.printf("[INFO] Successfully captured %d packets ready for analysis%n", packets.size());
+                }
             }
         } catch (IllegalArgumentException | IllegalStateException e) {
-            System.err.println(e.getMessage());
+            System.err.println("[ERROR] " + e.getMessage());
             try {
                 InterfaceSelector.printAvailableInterfaces();
             } catch (PcapNativeException ignored) {
-                System.err.println("Unable to list interfaces.");
+                System.err.println("[ERROR] Unable to list interfaces.");
             }
+            System.exit(1);
         } catch (PcapNativeException | NotOpenException e) {
-            System.err.println("Packet capture failed: " + e.getMessage());
+            System.err.println("[ERROR] Packet capture failed: " + e.getMessage());
+            System.exit(1);
         }
     }
 }

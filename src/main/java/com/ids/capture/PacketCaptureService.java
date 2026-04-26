@@ -21,18 +21,24 @@ import org.pcap4j.packet.UdpPacket;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
-public class PacketCaptureService {
+public class PacketCaptureService implements AutoCloseable {
 
     private final int snapLen;
     private final int timeoutMillis;
+    private volatile boolean capturing = false;
+    private final AtomicInteger packetsProcessed = new AtomicInteger(0);
+    private final AtomicInteger packetsFailed = new AtomicInteger(0);
 
     public PacketCaptureService(int snapLen, int timeoutMillis) {
-        this.snapLen = snapLen;
-        this.timeoutMillis = timeoutMillis;
+        this.snapLen = Math.max(64, Math.min(snapLen, 262144));
+        this.timeoutMillis = Math.max(1, timeoutMillis);
     }
 
-    public List<PacketData> capture(PcapNetworkInterface networkInterface, int packetCount) throws PcapNativeException, NotOpenException {
+    public List<PacketData> capture(PcapNetworkInterface networkInterface, int packetCount) 
+            throws PcapNativeException, NotOpenException {
+        
         if (networkInterface == null) {
             throw new IllegalArgumentException("PcapNetworkInterface must not be null.");
         }
@@ -40,69 +46,113 @@ public class PacketCaptureService {
             throw new IllegalArgumentException("packetCount must be greater than zero.");
         }
 
-        PcapHandle handle = networkInterface.openLive(snapLen, PromiscuousMode.PROMISCUOUS, timeoutMillis);
-        List<PacketData> packets = Collections.synchronizedList(new ArrayList<>());
+        packetsProcessed.set(0);
+        packetsFailed.set(0);
+        capturing = true;
+
+        PcapHandle handle = null;
+        List<PacketData> packets = Collections.synchronizedList(new ArrayList<>(packetCount));
 
         try {
+            handle = networkInterface.openLive(snapLen, PromiscuousMode.PROMISCUOUS, timeoutMillis);
+            
             int captured = 0;
-            while (captured < packetCount) {
+            while (captured < packetCount && capturing) {
                 try {
                     PcapPacket packet = handle.getNextPacketEx();
                     if (packet != null) {
-                        packets.add(convert(packet));
-                        captured++;
+                        try {
+                            PacketData packetData = convert(packet);
+                            packets.add(packetData);
+                            packetsProcessed.incrementAndGet();
+                            captured++;
+                        } catch (Exception e) {
+                            packetsFailed.incrementAndGet();
+                        }
                     }
                 } catch (TimeoutException e) {
-                    break;
+                    // Timeout is expected, continue trying
+                    Thread.yield();
                 }
             }
         } finally {
-            handle.close();
+            capturing = false;
+            if (handle != null) {
+                try {
+                    handle.close();
+                } catch (Exception e) {
+                    // Suppress secondary exceptions
+                }
+            }
         }
 
         return new ArrayList<>(packets);
     }
 
+    public void stopCapture() {
+        capturing = false;
+    }
+
+    public int getPacketsProcessed() {
+        return packetsProcessed.get();
+    }
+
+    public int getPacketsFailed() {
+        return packetsFailed.get();
+    }
+
+    public CaptureStatistics getStatistics() {
+        return new CaptureStatistics(packetsProcessed.get(), packetsFailed.get());
+    }
+
     private PacketData convert(PcapPacket packet) {
+        Objects.requireNonNull(packet, "PcapPacket must not be null");
+
         String sourceIP = "";
         String destinationIP = "";
         String protocol = "Unknown";
         int sourcePort = 0;
         int destinationPort = 0;
         int tcpFlags = 0;
-        String interfaceName = packet.getHeader().toString();
+        String interfaceName = "";
         String macSource = "";
         String macDestination = "";
         String packetType = "Unknown";
         boolean isMalformed = false;
 
         try {
+            // Extract Ethernet layer
             EthernetPacket ethernet = packet.get(EthernetPacket.class);
             if (ethernet != null) {
-                macSource = ethernet.getHeader().getSrcAddr().toString();
-                macDestination = ethernet.getHeader().getDstAddr().toString();
+                macSource = safeString(ethernet.getHeader().getSrcAddr());
+                macDestination = safeString(ethernet.getHeader().getDstAddr());
                 packetType = "Ethernet";
             }
 
+            // Extract IP layer
             IpV4Packet ipv4 = packet.get(IpV4Packet.class);
             IpV6Packet ipv6 = packet.get(IpV6Packet.class);
-            ArpPacket arp = packet.get(ArpPacket.class);
+            
+            if (ipv4 != null) {
+                sourceIP = safeString(ipv4.getHeader().getSrcAddr());
+                destinationIP = safeString(ipv4.getHeader().getDstAddr());
+                packetType = "IPv4";
+            } else if (ipv6 != null) {
+                sourceIP = safeString(ipv6.getHeader().getSrcAddr());
+                destinationIP = safeString(ipv6.getHeader().getDstAddr());
+                packetType = "IPv6";
+            } else {
+                ArpPacket arp = packet.get(ArpPacket.class);
+                if (arp != null) {
+                    packetType = "ARP";
+                }
+            }
+
+            // Extract transport layer
             TcpPacket tcp = packet.get(TcpPacket.class);
             UdpPacket udp = packet.get(UdpPacket.class);
             IcmpV4CommonPacket icmpv4 = packet.get(IcmpV4CommonPacket.class);
             IcmpV6CommonPacket icmpv6 = packet.get(IcmpV6CommonPacket.class);
-
-            if (ipv4 != null) {
-                sourceIP = ipv4.getHeader().getSrcAddr().getHostAddress();
-                destinationIP = ipv4.getHeader().getDstAddr().getHostAddress();
-                packetType = "IPv4";
-            } else if (ipv6 != null) {
-                sourceIP = ipv6.getHeader().getSrcAddr().getHostAddress();
-                destinationIP = ipv6.getHeader().getDstAddr().getHostAddress();
-                packetType = "IPv6";
-            } else if (arp != null) {
-                packetType = "ARP";
-            }
 
             if (tcp != null) {
                 protocol = "TCP";
@@ -126,8 +176,7 @@ public class PacketCaptureService {
             isMalformed = true;
         }
 
-        Packet payloadPacket = packet.getPayload();
-        byte[] payload = payloadPacket != null ? payloadPacket.getRawData() : new byte[0];
+        byte[] payload = extractPayload(packet);
 
         return new PacketData(
                 sourceIP,
@@ -145,5 +194,45 @@ public class PacketCaptureService {
                 packetType,
                 isMalformed
         );
+    }
+
+    private String safeString(Object obj) {
+        return obj != null ? obj.toString() : "";
+    }
+
+    private byte[] extractPayload(PcapPacket packet) {
+        try {
+            Packet payload = packet.getPayload();
+            return payload != null ? payload.getRawData() : new byte[0];
+        } catch (Exception e) {
+            return new byte[0];
+        }
+    }
+
+    @Override
+    public void close() throws Exception {
+        stopCapture();
+    }
+
+    public static class CaptureStatistics {
+        public final int processed;
+        public final int failed;
+
+        public CaptureStatistics(int processed, int failed) {
+            this.processed = processed;
+            this.failed = failed;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("CaptureStatistics{processed=%d, failed=%d}", processed, failed);
+        }
+    }
+}
+
+class Objects {
+    static <T> T requireNonNull(T obj, String message) {
+        if (obj == null) throw new NullPointerException(message);
+        return obj;
     }
 }
