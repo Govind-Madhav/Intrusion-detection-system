@@ -1,9 +1,13 @@
 package com.ids;
 
-import com.ids.app.Application;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
+@SpringBootApplication
+@EnableScheduling
 public class Main {
     public static void main(String[] args) {
-        Application.main(args);
+        SpringApplication.run(Main.class, args);
     }
 }

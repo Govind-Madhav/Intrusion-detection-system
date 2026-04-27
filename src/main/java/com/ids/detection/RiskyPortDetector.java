@@ -34,7 +34,6 @@ public class RiskyPortDetector implements Detector {
         RISKY_PORTS.put(69, new PortInfo("TFTP", "MEDIUM"));
         RISKY_PORTS.put(135, new PortInfo("RPC", "MEDIUM"));
         RISKY_PORTS.put(139, new PortInfo("NetBIOS", "MEDIUM"));
-        RISKY_PORTS.put(5984, new PortInfo("CouchDB", "MEDIUM"));
         RISKY_PORTS.put(50070, new PortInfo("Hadoop", "MEDIUM"));
     }
 
@@ -108,4 +107,4 @@ public class RiskyPortDetector implements Detector {
             this.severity = severity;
         }
     }
-}}
+}
