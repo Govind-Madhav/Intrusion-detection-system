@@ -6,7 +6,7 @@ export default function FiltersBar({ filters, onChange, total, shown }) {
       <input
         id="filter-search"
         type="search"
-        placeholder="🔍  Search by IP, message, alert ID…"
+        placeholder="  Search by IP, message, alert ID…"
         value={filters.q}
         onChange={set('q')}
       />
